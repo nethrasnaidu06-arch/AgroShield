@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   GitCompare,
   LayoutDashboard,
+  LogOut,
   Map as MapIcon,
   Menu,
   Microscope,
@@ -20,7 +21,7 @@ import {
   Tractor,
   X,
 } from 'lucide-react';
-import { UserRole } from '../types/agroshield.ts';
+import { UserAccount, UserRole } from '../types/agroshield.ts';
 
 export interface NavItem {
   id: string;
@@ -54,6 +55,8 @@ interface AppLayoutProps {
   activeRole: UserRole;
   onChangeRole: (role: UserRole) => void;
   activeAlertCount: number;
+  currentUser?: UserAccount | null;
+  onLogout?: () => void;
   children: React.ReactNode;
 }
 
@@ -63,6 +66,8 @@ export function AppLayout({
   activeRole,
   onChangeRole,
   activeAlertCount,
+  currentUser,
+  onLogout,
   children,
 }: AppLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -144,20 +149,41 @@ export function AppLayout({
         ))}
       </nav>
 
-      <div className="p-4 border-t border-emerald-900/80 bg-[#0B2317]">
-        <label htmlFor={`role-switcher-${idPrefix}`} className="block text-[11px] text-emerald-300/80 mb-1.5">
-          Active Access Role (RBAC)
-        </label>
-        <select
-          id={`role-switcher-${idPrefix}`}
-          value={activeRole}
-          onChange={(e) => onChangeRole(e.target.value as UserRole)}
-          className="w-full rounded-md bg-emerald-950 border border-emerald-800 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-400 transition-colors"
-        >
-          <option value={UserRole.FARMER}>Farmer Operator (Demo)</option>
-          <option value={UserRole.EXPERT}>Agricultural Expert (Demo)</option>
-          <option value={UserRole.ADMIN}>Platform Admin (Demo)</option>
-        </select>
+      <div className="p-4 border-t border-emerald-900/80 bg-[#0B2317] space-y-3">
+        {currentUser && (
+          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-emerald-900/70">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-white truncate">{currentUser.fullName}</div>
+              <div className="text-[11px] text-emerald-300/80 font-mono truncate">{currentUser.email}</div>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                title="Sign out"
+                aria-label="Sign out of AgroShield"
+                className="p-1.5 rounded-md text-emerald-200 hover:text-white hover:bg-emerald-900/60 transition-colors shrink-0"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+        <div>
+          <label htmlFor={`role-switcher-${idPrefix}`} className="block text-[11px] text-emerald-300/80 mb-1.5">
+            Active Access Role (RBAC)
+          </label>
+          <select
+            id={`role-switcher-${idPrefix}`}
+            value={activeRole}
+            onChange={(e) => onChangeRole(e.target.value as UserRole)}
+            className="w-full rounded-md bg-emerald-950 border border-emerald-800 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-emerald-400 transition-colors"
+          >
+            <option value={UserRole.FARMER}>Farmer Operator (Demo)</option>
+            <option value={UserRole.EXPERT}>Agricultural Expert (Demo)</option>
+            <option value={UserRole.ADMIN}>Platform Admin (Demo)</option>
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -223,9 +249,10 @@ export function AppLayout({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
-            <span className="hidden sm:inline text-xs text-slate-500 whitespace-nowrap">
-              Role: <strong className="font-medium text-slate-800 capitalize">{activeRole}</strong> · Demo Mode
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="hidden md:inline text-xs text-slate-500 whitespace-nowrap">
+              Role: <strong className="font-medium text-slate-800 capitalize">{activeRole}</strong> ·{' '}
+              {currentUser?.isDemo === false ? 'Registered Account' : 'Demo Mode'}
             </span>
             <button
               onClick={() => onSelectPage('scanner')}
@@ -233,6 +260,16 @@ export function AppLayout({
             >
               New Leaf Scan
             </button>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-stone-200 rounded-md hover:bg-stone-50 hover:text-slate-900 transition-colors whitespace-nowrap shrink-0"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            )}
           </div>
         </header>
 

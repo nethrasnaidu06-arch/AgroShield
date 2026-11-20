@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
-import { db, seedDemoDatabase } from '../database/db.ts';
+import { db, DEFAULT_DEMO_PASSWORD, hashPassword, seedDemoDatabase, verifyPassword } from '../database/db.ts';
 import { evaluateZoneDiseaseRisk } from '../business/riskEngine.ts';
 import {
   AlertCategory,
@@ -19,12 +19,193 @@ function uid(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function mapUserRow(u: any) {
+  return {
+    id: u.id,
+    fullName: u.full_name,
+    email: u.email,
+    role: u.role as UserRole,
+    district: u.district,
+    organization: u.organization,
+    active: Boolean(u.active),
+    isDemo: Boolean(u.is_demo),
+    createdAt: u.created_at,
+  };
+}
+
+function createAuthSession(userId: string, rememberMe = false): { token: string; expiresAt: string } {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = new Date();
+  const ttlHours = rememberMe ? 24 * 7 : 24;
+  const expiresAt = new Date(now.getTime() + ttlHours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO auth_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
+    token,
+    userId,
+    now.toISOString(),
+    expiresAt
+  );
+  return { token, expiresAt };
+}
+
+function getBearerToken(req: Request): string | null {
+  const header = req.header('authorization') || '';
+  if (header.toLowerCase().startsWith('bearer ')) {
+    return header.slice(7).trim() || null;
+  }
+  return null;
+}
+
 function getRoleFromHeader(req: Request): UserRole {
   const raw = String(req.header('x-agroshield-role') || UserRole.FARMER).toLowerCase();
   if (raw === UserRole.ADMIN) return UserRole.ADMIN;
   if (raw === UserRole.EXPERT) return UserRole.EXPERT;
   return UserRole.FARMER;
 }
+
+// 0. AUTHENTICATION & SESSION MANAGEMENT
+apiRouter.post('/auth/login', (req: Request, res: Response) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const rememberMe = Boolean(req.body?.rememberMe);
+
+  if (!email || !password) {
+    res.status(400).json({ error: 'Email address and password are required.' });
+    return;
+  }
+
+  const userRow = db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(email) as any;
+  if (!userRow || !verifyPassword(password, userRow.password_hash)) {
+    res.status(401).json({ error: 'Invalid email address or password.' });
+    return;
+  }
+
+  if (!userRow.active) {
+    res.status(403).json({ error: 'This account has been deactivated. Contact a Platform Administrator.' });
+    return;
+  }
+
+  const session = createAuthSession(userRow.id, rememberMe);
+  res.json({
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: mapUserRow(userRow),
+  });
+});
+
+apiRouter.post('/auth/register', (req: Request, res: Response) => {
+  const fullName = String(req.body?.fullName || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const requestedRole = String(req.body?.role || UserRole.FARMER).toLowerCase();
+  const district = String(req.body?.district || 'Karnataka').trim() || 'Karnataka';
+  const organization = String(req.body?.organization || 'Independent Farm').trim() || 'Independent Farm';
+
+  if (!fullName || !email || !password) {
+    res.status(400).json({ error: 'Full name, email address, and password are required.' });
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: 'Please enter a valid email address.' });
+    return;
+  }
+  if (password.length < 8) {
+    res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    return;
+  }
+
+  const existing = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email);
+  if (existing) {
+    res.status(409).json({ error: 'An account with this email address already exists.' });
+    return;
+  }
+
+  const safeRole = requestedRole === UserRole.EXPERT ? UserRole.EXPERT : UserRole.FARMER;
+  const id = uid('usr');
+  const now = new Date().toISOString();
+  const passwordHash = hashPassword(password);
+
+  db.prepare(`
+    INSERT INTO users (id, full_name, email, password_hash, role, district, organization, active, is_demo, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
+  `).run(id, fullName, email, passwordHash, safeRole, district, organization, now);
+
+  const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  const session = createAuthSession(id, true);
+
+  res.status(201).json({
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: mapUserRow(userRow),
+  });
+});
+
+apiRouter.post('/auth/demo-login', (req: Request, res: Response) => {
+  const role = String(req.body?.role || '').toLowerCase();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+
+  let userRow: any = null;
+  if (email) {
+    userRow = db.prepare('SELECT * FROM users WHERE LOWER(email) = ? AND is_demo = 1 AND active = 1').get(email);
+  } else if (role) {
+    userRow = db.prepare('SELECT * FROM users WHERE LOWER(role) = ? AND is_demo = 1 AND active = 1 LIMIT 1').get(role);
+  }
+
+  if (!userRow) {
+    res.status(404).json({ error: 'Requested demo account was not found.' });
+    return;
+  }
+
+  const session = createAuthSession(userRow.id, false);
+  res.json({
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: mapUserRow(userRow),
+  });
+});
+
+apiRouter.get('/auth/me', (req: Request, res: Response) => {
+  const token = getBearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: 'Authentication required.' });
+    return;
+  }
+
+  const row = db.prepare(`
+    SELECT s.expires_at, u.*
+    FROM auth_sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.token = ?
+  `).get(token) as any;
+
+  if (!row) {
+    res.status(401).json({ error: 'Session is invalid or has expired.' });
+    return;
+  }
+
+  if (new Date(row.expires_at).getTime() <= Date.now()) {
+    db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token);
+    res.status(401).json({ error: 'Session has expired. Please sign in again.' });
+    return;
+  }
+
+  if (!row.active) {
+    res.status(403).json({ error: 'This account is inactive.' });
+    return;
+  }
+
+  res.json({
+    expiresAt: row.expires_at,
+    user: mapUserRow(row),
+  });
+});
+
+apiRouter.post('/auth/logout', (req: Request, res: Response) => {
+  const token = getBearerToken(req);
+  if (token) {
+    db.prepare('DELETE FROM auth_sessions WHERE token = ?').run(token);
+  }
+  res.json({ loggedOut: true });
+});
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -1814,19 +1995,7 @@ apiRouter.get('/reports/export', (req: Request, res: Response) => {
 // 13. SETTINGS & USER MANAGEMENT (RBAC)
 apiRouter.get('/users', (_req: Request, res: Response) => {
   const rows = db.prepare('SELECT * FROM users ORDER BY role ASC').all() as any[];
-  res.json(
-    rows.map((u) => ({
-      id: u.id,
-      fullName: u.full_name,
-      email: u.email,
-      role: u.role,
-      district: u.district,
-      organization: u.organization,
-      active: Boolean(u.active),
-      isDemo: Boolean(u.is_demo),
-      createdAt: u.created_at,
-    }))
-  );
+  res.json(rows.map(mapUserRow));
 });
 
 apiRouter.post('/users', (req: Request, res: Response) => {
@@ -1835,19 +2004,20 @@ apiRouter.post('/users', (req: Request, res: Response) => {
     res.status(403).json({ error: 'RBAC: Only Administrators can provision new user accounts.' });
     return;
   }
-  const { fullName, email, role, district, organization } = req.body;
+  const { fullName, email, role, district, organization, password } = req.body;
   if (!fullName || !email || !role) {
     res.status(400).json({ error: 'fullName, email, and role are required.' });
     return;
   }
   const id = uid('usr');
   const now = new Date().toISOString();
+  const initialHash = hashPassword(String(password || DEFAULT_DEMO_PASSWORD));
   try {
     db.prepare(`
-      INSERT INTO users (id, full_name, email, role, district, organization, active, is_demo, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
-    `).run(id, fullName, email, role, district || 'Karnataka', organization || 'Partner Farm', now);
-    res.status(201).json({ id, fullName, email, role });
+      INSERT INTO users (id, full_name, email, password_hash, role, district, organization, active, is_demo, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?)
+    `).run(id, fullName, String(email).trim().toLowerCase(), initialHash, role, district || 'Karnataka', organization || 'Partner Farm', now);
+    res.status(201).json({ id, fullName, email: String(email).trim().toLowerCase(), role });
   } catch (err: any) {
     res.status(409).json({ error: err.message });
   }

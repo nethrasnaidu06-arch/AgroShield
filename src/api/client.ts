@@ -1,6 +1,7 @@
-import { UserRole } from '../types/agroshield.ts';
+import { UserAccount, UserRole } from '../types/agroshield.ts';
 
 let activeRole: UserRole = UserRole.FARMER;
+let authToken: string | null = null;
 
 export function setApiClientRole(role: UserRole) {
   activeRole = role;
@@ -10,12 +11,22 @@ export function getApiClientRole(): UserRole {
   return activeRole;
 }
 
+export function setApiAuthToken(token: string | null) {
+  authToken = token;
+}
+
+export function getApiAuthToken(): string | null {
+  return authToken;
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const authHeaders: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {};
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       'x-agroshield-role': activeRole,
+      ...authHeaders,
       ...(options.headers || {}),
     },
   });
@@ -107,6 +118,31 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+
+  authLogin: (body: { email: string; password: string; rememberMe?: boolean }) =>
+    request<{ token: string; expiresAt: string; user: UserAccount }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  authRegister: (body: {
+    fullName: string;
+    email: string;
+    password: string;
+    role: UserRole;
+    district: string;
+    organization: string;
+  }) =>
+    request<{ token: string; expiresAt: string; user: UserAccount }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  authDemoLogin: (body: { role?: UserRole; email?: string }) =>
+    request<{ token: string; expiresAt: string; user: UserAccount }>('/api/auth/demo-login', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  authMe: () => request<{ expiresAt: string; user: UserAccount }>('/api/auth/me'),
+  authLogout: () => request<{ loggedOut: boolean }>('/api/auth/logout', { method: 'POST' }),
 
   getUsers: () => request<any[]>('/api/users'),
   createUser: (body: any) => request<any>('/api/users', { method: 'POST', body: JSON.stringify(body) }),

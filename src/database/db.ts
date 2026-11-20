@@ -1,7 +1,30 @@
 import Database from 'better-sqlite3';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { generateKarnatakaDemoDataset } from '../demo/seedData.ts';
+
+export const DEFAULT_DEMO_PASSWORD = 'AgroShield@2026';
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+export function verifyPassword(password: string, storedHash: string | null | undefined): boolean {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, keyHex] = storedHash.split(':');
+  if (!salt || !keyHex) return false;
+  try {
+    const keyBuf = Buffer.from(keyHex, 'hex');
+    const derived = crypto.scryptSync(password, salt, 64);
+    if (keyBuf.length !== derived.length) return false;
+    return crypto.timingSafeEqual(keyBuf, derived);
+  } catch {
+    return false;
+  }
+}
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 if (!fs.existsSync(DATA_DIR)) {
@@ -19,12 +42,20 @@ export function initializeDatabase(): void {
       id TEXT PRIMARY KEY,
       full_name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
+      password_hash TEXT,
       role TEXT NOT NULL,
       district TEXT NOT NULL,
       organization TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       is_demo INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS farms (
@@ -300,6 +331,7 @@ export function initializeDatabase(): void {
 
   // Safe schema migrations for existing DB files
   const safeAlters = [
+    'ALTER TABLE users ADD COLUMN password_hash TEXT',
     "ALTER TABLE treatments ADD COLUMN outcome_status TEXT NOT NULL DEFAULT 'pending_evaluation'",
     'ALTER TABLE treatments ADD COLUMN expert_verified INTEGER NOT NULL DEFAULT 0',
     "ALTER TABLE advisory_articles ADD COLUMN risk_factors TEXT NOT NULL DEFAULT '[]'",
@@ -326,6 +358,19 @@ export function initializeDatabase(): void {
     if (revCount === 0) {
       seedUpgradeDelta();
     }
+  }
+
+  // Ensure all users without a password hash (including seeded demo accounts on existing DBs) receive a valid scrypt hash
+  const usersWithoutHash = db.prepare("SELECT id FROM users WHERE password_hash IS NULL OR password_hash = ''").all() as Array<{ id: string }>;
+  if (usersWithoutHash.length > 0) {
+    const upd = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+    const defaultHash = hashPassword(DEFAULT_DEMO_PASSWORD);
+    const tx = db.transaction(() => {
+      for (const u of usersWithoutHash) {
+        upd.run(defaultHash, u.id);
+      }
+    });
+    tx();
   }
 }
 
@@ -382,12 +427,18 @@ export function seedDemoDatabase(): void {
   const data = generateKarnatakaDemoDataset();
 
   const insertTransaction = db.transaction(() => {
+    const defaultDemoHash = hashPassword(DEFAULT_DEMO_PASSWORD);
     const insUser = db.prepare(
-      `INSERT OR REPLACE INTO users (id, full_name, email, role, district, organization, active, is_demo, created_at)
-       VALUES (@id, @fullName, @email, @role, @district, @organization, @active, @isDemo, @createdAt)`
+      `INSERT OR REPLACE INTO users (id, full_name, email, password_hash, role, district, organization, active, is_demo, created_at)
+       VALUES (@id, @fullName, @email, @passwordHash, @role, @district, @organization, @active, @isDemo, @createdAt)`
     );
     for (const u of data.users) {
-      insUser.run({ ...u, active: u.active ? 1 : 0, isDemo: u.isDemo ? 1 : 0 });
+      insUser.run({
+        ...u,
+        passwordHash: defaultDemoHash,
+        active: u.active ? 1 : 0,
+        isDemo: u.isDemo ? 1 : 0,
+      });
     }
 
     const insFarm = db.prepare(
