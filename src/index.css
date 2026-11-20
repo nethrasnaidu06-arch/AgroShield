@@ -1,0 +1,198 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@layer base {
+  :root {
+    --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
+    --font-sans: "DM Sans", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #f6f7f5;
+    color: #0f172a;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.985);
+  }
+}
+
+/* AgroShield Keyframes */
+@keyframes agro-scan-beam {
+  0% {
+    top: 4%;
+    opacity: 0.35;
+  }
+  50% {
+    top: 92%;
+    opacity: 1;
+  }
+  100% {
+    top: 4%;
+    opacity: 0.35;
+  }
+}
+
+@keyframes agro-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes agro-sensor-ripple {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.75;
+  }
+  70% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes agro-float-gentle {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes agro-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agro-scan-line {
+  animation: agro-scan-beam 2.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+}
+
+.agro-shimmer-bar {
+  background: linear-gradient(90deg, #f5f5f4 25%, #e7e5e4 50%, #f5f5f4 75%);
+  background-size: 200% 100%;
+  animation: agro-shimmer 1.6s ease-in-out infinite;
+}
+
+.agro-pulse-ring {
+  animation: agro-sensor-ripple 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  pointer-events: none;
+}
+
+.agro-weather-float {
+  animation: agro-float-gentle 3.4s ease-in-out infinite;
+}
+
+.agro-row-enter {
+  animation: agro-row-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.agro-card-hover {
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 200ms ease;
+}
+
+.agro-card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -6px rgba(15, 46, 30, 0.08);
+  border-color: #d6d3d1;
+}
+
+/* Leaflet map container adjustments & smooth zone status transitions */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #eaece8;
+}
+
+.leaflet-interactive {
+  transition: fill 320ms ease, stroke 320ms ease, fill-opacity 260ms ease, stroke-width 200ms ease;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.leaflet-popup-content {
+  margin: 12px 14px;
+}
+
+/* Map risk pulse divIcon */
+.agro-map-pulse-wrap {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.agro-map-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid #dc2626;
+  animation: agro-sensor-ripple 2s ease-out infinite;
+  pointer-events: none;
+}
+
+.agro-map-pulse-ring-amber {
+  border-color: #d97706;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .agro-card-hover:hover {
+    transform: none;
+  }
+}
+
+@media print {
+  aside, header, .no-print {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}

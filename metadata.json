@@ -1,0 +1,6 @@
+{
+  "name": "AgroShield",
+  "description": "AI-powered crop disease prediction, prevention, and intelligent farm monitoring platform.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
